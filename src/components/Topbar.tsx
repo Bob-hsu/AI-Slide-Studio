@@ -1,12 +1,25 @@
 import React, { useState } from 'react';
 import { useEditorStore } from '../store/useEditorStore';
-import { ArrowLeft, Download, Play, Share2, Wand2, Type, Image as ImageIcon, Square, Circle, Triangle, FileText, Users } from 'lucide-react';
+import { ArrowLeft, Download, Play, Share2, Wand2, Type, Image as ImageIcon, Square, Circle, Triangle, FileText, Bookmark, X, Folder } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 
 export default function Topbar({ onBack }: { onBack: () => void }) {
-  const { presentation, activeSlideId, addElement, setPresentation, activeUsers, user } = useEditorStore();
+  const { 
+    presentation, 
+    activeSlideId, 
+    addElement, 
+    setPresentation, 
+    addCustomTemplate,
+    templateFolders 
+  } = useEditorStore();
+  
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [title, setTitle] = useState(presentation?.title || 'Untitled Presentation');
+  const [showSaveTemplateModal, setShowSaveTemplateModal] = useState(false);
+  const [templateName, setTemplateName] = useState('');
+  const [templateDescription, setTemplateDescription] = useState('');
+  const [templateTags, setTemplateTags] = useState('');
+  const [selectedFolderId, setSelectedFolderId] = useState('');
 
   if (!presentation) return null;
 
@@ -30,6 +43,54 @@ export default function Topbar({ onBack }: { onBack: () => void }) {
       content: 'New Text Box',
       style: { fontSize: '24px', color: '#1a1a1a', fontWeight: 'normal' }
     });
+  };
+
+  const handleAddImage = () => {
+    if (!activeSlideId || presentation.isImagePPT) return;
+    const url = prompt('Enter image URL:');
+    if (!url) return;
+    addElement(activeSlideId, {
+      type: 'image',
+      x: 100,
+      y: 100,
+      width: 300,
+      height: 200,
+      content: url,
+    });
+  };
+
+  const handleAddShape = (shapeType: 'rectangle' | 'circle' | 'triangle') => {
+    if (!activeSlideId || presentation.isImagePPT) return;
+    
+    let style: React.CSSProperties = { background: '#4f46e5', opacity: 0.8 };
+    if (shapeType === 'circle') style.borderRadius = '50%';
+    if (shapeType === 'triangle') {
+      style.clipPath = 'polygon(50% 0%, 0% 100%, 100% 100%)';
+    }
+
+    addElement(activeSlideId, {
+      type: 'shape',
+      x: 150,
+      y: 150,
+      width: shapeType === 'triangle' ? 100 : 100,
+      height: 100,
+      content: shapeType,
+      style
+    });
+  };
+
+  const handleShare = () => {
+    const url = window.location.href;
+    navigator.clipboard.writeText(url);
+    console.log('Presentation link copied to clipboard!');
+  };
+
+  const handlePresent = () => {
+    if (document.documentElement.requestFullscreen) {
+      document.documentElement.requestFullscreen();
+    } else {
+      console.log('Fullscreen mode not supported in this browser.');
+    }
   };
 
   const handleExportMD = () => {
@@ -98,6 +159,29 @@ export default function Topbar({ onBack }: { onBack: () => void }) {
     pdf.save(`${presentation.title || 'Presentation'}.pdf`);
   };
 
+  const handleSaveAsTemplate = () => {
+    if (!activeSlideId) return;
+    const slide = presentation.slides.find(s => s.id === activeSlideId);
+    if (!slide) return;
+
+    setTemplateName(`Template ${new Date().toLocaleTimeString()}`);
+    setShowSaveTemplateModal(true);
+  };
+
+  const confirmSaveTemplate = () => {
+    if (!activeSlideId || !templateName) return;
+    const slide = presentation.slides.find(s => s.id === activeSlideId);
+    if (!slide) return;
+
+    const tags = templateTags.split(',').map(t => t.trim()).filter(t => t !== '');
+    addCustomTemplate(templateName, slide, selectedFolderId || undefined, templateDescription, tags);
+    setShowSaveTemplateModal(false);
+    setTemplateName('');
+    setTemplateDescription('');
+    setTemplateTags('');
+    console.log('Slide saved to your Template Library!');
+  };
+
   return (
     <div className="h-16 bg-white border-b border-gray-200 flex items-center justify-between px-4 z-10 shadow-sm">
       <div className="flex items-center gap-4">
@@ -128,76 +212,66 @@ export default function Topbar({ onBack }: { onBack: () => void }) {
               {title}
             </h1>
           )}
-          <span className="text-xs text-gray-500 px-2 flex items-center gap-1">
-            <div className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse"></div>
-            Real-time collaboration active
-          </span>
+          <span className="text-xs text-gray-500 px-2">Saved to cloud</span>
         </div>
       </div>
 
-      <div className="flex items-center gap-2 px-4 h-full border-x border-gray-200">
-        <div className="flex -space-x-2 mr-4">
-          {activeUsers.map((u) => (
-            <div 
-              key={u.id}
-              className="w-8 h-8 rounded-full border-2 border-white flex items-center justify-center text-[10px] font-bold text-white shadow-sm transition-transform hover:scale-110 cursor-default"
-              style={{ backgroundColor: u.color }}
-              title={u.name + (u.id === user?.id ? ' (You)' : '')}
-            >
-              {u.name.charAt(0).toUpperCase()}
-            </div>
-          ))}
-          {activeUsers.length > 5 && (
-            <div className="w-8 h-8 rounded-full border-2 border-white bg-gray-200 flex items-center justify-center text-[10px] font-bold text-gray-600 shadow-sm">
-              +{activeUsers.length - 5}
-            </div>
-          )}
+      {!presentation.isImagePPT && (
+        <div className="flex items-center gap-2 border-x border-gray-200 px-4 h-full">
+          <button 
+            onClick={handleAddText}
+            className="p-2 hover:bg-gray-100 rounded-lg text-gray-600 transition-colors flex items-center gap-2"
+            title="Add Text"
+          >
+            <Type className="w-5 h-5" />
+            <span className="text-sm font-medium hidden md:inline">Text</span>
+          </button>
+          <button 
+            onClick={handleAddImage}
+            className="p-2 hover:bg-gray-100 rounded-lg text-gray-600 transition-colors flex items-center gap-2"
+            title="Add Image"
+          >
+            <ImageIcon className="w-5 h-5" />
+            <span className="text-sm font-medium hidden md:inline">Image</span>
+          </button>
+          <div className="h-6 w-px bg-gray-300 mx-2"></div>
+          <button 
+            onClick={() => handleAddShape('rectangle')}
+            className="p-2 hover:bg-gray-100 rounded-lg text-gray-600 transition-colors" 
+            title="Rectangle"
+          >
+            <Square className="w-5 h-5" />
+          </button>
+          <button 
+            onClick={() => handleAddShape('circle')}
+            className="p-2 hover:bg-gray-100 rounded-lg text-gray-600 transition-colors" 
+            title="Circle"
+          >
+            <Circle className="w-5 h-5" />
+          </button>
+          <button 
+            onClick={() => handleAddShape('triangle')}
+            className="p-2 hover:bg-gray-100 rounded-lg text-gray-600 transition-colors" 
+            title="Triangle"
+          >
+            <Triangle className="w-5 h-5" />
+          </button>
+          <div className="h-6 w-px bg-gray-300 mx-2"></div>
+          <button 
+            onClick={() => {
+              if (activeSlideId) {
+                useEditorStore.getState().updateSlideBackground(activeSlideId, '#f3f4f6');
+                console.log('Design Intelligence applied: Optimized layout and colors.');
+              }
+            }}
+            className="p-2 hover:bg-indigo-50 text-indigo-600 rounded-lg transition-colors flex items-center gap-2" 
+            title="Auto Design"
+          >
+            <Wand2 className="w-5 h-5" />
+            <span className="text-sm font-medium hidden md:inline">Auto Design</span>
+          </button>
         </div>
-
-        {!presentation.isImagePPT && (
-          <div className="flex items-center gap-2">
-            <button 
-              onClick={handleAddText}
-              className="p-2 hover:bg-gray-100 rounded-lg text-gray-600 transition-colors flex items-center gap-2"
-              title="Add Text"
-            >
-              <Type className="w-5 h-5" />
-              <span className="text-sm font-medium hidden md:inline">Text</span>
-            </button>
-            <button 
-              className="p-2 hover:bg-gray-100 rounded-lg text-gray-600 transition-colors flex items-center gap-2"
-              title="Add Image"
-            >
-              <ImageIcon className="w-5 h-5" />
-              <span className="text-sm font-medium hidden md:inline">Image</span>
-            </button>
-            <div className="h-6 w-px bg-gray-300 mx-2"></div>
-            <button className="p-2 hover:bg-gray-100 rounded-lg text-gray-600 transition-colors" title="Rectangle">
-              <Square className="w-5 h-5" />
-            </button>
-            <button className="p-2 hover:bg-gray-100 rounded-lg text-gray-600 transition-colors" title="Circle">
-              <Circle className="w-5 h-5" />
-            </button>
-            <button className="p-2 hover:bg-gray-100 rounded-lg text-gray-600 transition-colors" title="Triangle">
-              <Triangle className="w-5 h-5" />
-            </button>
-            <div className="h-6 w-px bg-gray-300 mx-2"></div>
-            <button 
-              onClick={() => {
-                if (activeSlideId) {
-                  useEditorStore.getState().updateSlideBackground(activeSlideId, '#f3f4f6');
-                  alert('Design Intelligence applied: Optimized layout and colors.');
-                }
-              }}
-              className="p-2 hover:bg-indigo-50 text-indigo-600 rounded-lg transition-colors flex items-center gap-2" 
-              title="Auto Design"
-            >
-              <Wand2 className="w-5 h-5" />
-              <span className="text-sm font-medium hidden md:inline">Auto Design</span>
-            </button>
-          </div>
-        )}
-      </div>
+      )}
 
       <div className="flex items-center gap-3 ml-auto">
         {presentation.isImagePPT && (
@@ -211,21 +285,118 @@ export default function Topbar({ onBack }: { onBack: () => void }) {
           </button>
         )}
         <button 
+          onClick={handleSaveAsTemplate}
+          className="flex items-center gap-2 px-4 py-2 text-indigo-600 hover:bg-indigo-50 rounded-lg font-medium transition-colors border border-indigo-200"
+          title="Save current slide as a template"
+        >
+          <Bookmark className="w-4 h-4" />
+          <span className="hidden sm:inline">Save Template</span>
+        </button>
+        <button 
           onClick={handleExportPDF}
           className="flex items-center gap-2 px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg font-medium transition-colors border border-gray-200"
         >
           <Download className="w-4 h-4" />
           <span className="hidden sm:inline">Export PDF</span>
         </button>
-        <button className="flex items-center gap-2 px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg font-medium transition-colors">
+        <button 
+          onClick={handleShare}
+          className="flex items-center gap-2 px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg font-medium transition-colors"
+        >
           <Share2 className="w-4 h-4" />
           <span className="hidden sm:inline">Share</span>
         </button>
-        <button className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 transition-colors shadow-sm">
+        <button 
+          onClick={handlePresent}
+          className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 transition-colors shadow-sm"
+        >
           <Play className="w-4 h-4" />
           <span className="hidden sm:inline">Present</span>
         </button>
       </div>
+
+      {/* Save Template Modal */}
+      {showSaveTemplateModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[100] p-4">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-md shadow-xl">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-xl font-bold flex items-center gap-2">
+                <Bookmark className="w-6 h-6 text-indigo-600" />
+                Save as Template
+              </h2>
+              <button onClick={() => setShowSaveTemplateModal(false)} className="p-2 hover:bg-gray-100 rounded-full">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-4 mb-6">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Template Name</label>
+                <input
+                  type="text"
+                  value={templateName}
+                  onChange={(e) => setTemplateName(e.target.value)}
+                  className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                  placeholder="Enter template name..."
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Description (Optional)</label>
+                <textarea
+                  value={templateDescription}
+                  onChange={(e) => setTemplateDescription(e.target.value)}
+                  className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 h-20 resize-none"
+                  placeholder="What is this template for?"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Tags (Comma separated)</label>
+                <input
+                  type="text"
+                  value={templateTags}
+                  onChange={(e) => setTemplateTags(e.target.value)}
+                  className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                  placeholder="e.g., Marketing, Minimalist, AI"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1 flex items-center gap-2">
+                  <Folder className="w-4 h-4" /> Select Folder (Optional)
+                </label>
+                <select
+                  value={selectedFolderId}
+                  onChange={(e) => setSelectedFolderId(e.target.value)}
+                  className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                >
+                  <option value="">Uncategorized</option>
+                  {templateFolders.map(f => (
+                    <option key={f.id} value={f.id}>{f.name}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3">
+              <button 
+                onClick={() => setShowSaveTemplateModal(false)}
+                className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg font-medium"
+              >
+                Cancel
+              </button>
+              <button 
+                onClick={confirmSaveTemplate}
+                disabled={!templateName}
+                className="px-4 py-2 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 disabled:opacity-50"
+              >
+                Save Template
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

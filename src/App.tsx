@@ -9,7 +9,9 @@ const COLORS = ['#F87171', '#60A5FA', '#34D399', '#FBBF24', '#A78BFA', '#F472B6'
 
 export default function App() {
   const [currentView, setCurrentView] = useState<'dashboard' | 'editor'>('dashboard');
-  const { user, setUser, initSocket } = useEditorStore();
+  const user = useEditorStore(state => state.user);
+  const setUser = useEditorStore(state => state.setUser);
+  const initSocket = useEditorStore(state => state.initSocket);
   const [userName, setUserName] = useState('');
 
   useEffect(() => {

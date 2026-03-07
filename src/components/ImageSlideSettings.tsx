@@ -1,10 +1,11 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useEditorStore } from '../store/useEditorStore';
-import { Wand2, Image as ImageIcon } from 'lucide-react';
+import { Wand2, Image as ImageIcon, Edit2 } from 'lucide-react';
 
 export default function ImageSlideSettings() {
-  const { presentation, activeSlideId, updateSlide, generateImageForSlide } = useEditorStore();
+  const { presentation, activeSlideId, updateSlide, generateImageForSlide, editImageForSlide } = useEditorStore();
   const activeSlide = presentation?.slides.find(s => s.id === activeSlideId);
+  const [editPrompt, setEditPrompt] = useState('');
 
   if (!presentation?.isImagePPT || !activeSlide) return null;
 
@@ -51,6 +52,23 @@ export default function ImageSlideSettings() {
             className="w-full p-2 border border-gray-300 rounded-md text-sm h-32"
           />
         </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Image Size (Nano Banana Pro)</label>
+          <select
+            value={presentation.imageSize || '1K'}
+            onChange={(e) => useEditorStore.getState().updateSlide(activeSlide.id, { ...activeSlide })} // Just to trigger re-render if needed, actually we should update presentation
+            className="w-full p-2 border border-gray-300 rounded-md text-sm"
+            onChangeCapture={(e) => {
+              useEditorStore.setState((state) => ({
+                presentation: state.presentation ? { ...state.presentation, imageSize: (e.target as HTMLSelectElement).value } : null
+              }));
+            }}
+          >
+            <option value="1K">1K</option>
+            <option value="2K">2K</option>
+            <option value="4K">4K</option>
+          </select>
+        </div>
 
         <button
           onClick={() => generateImageForSlide(activeSlide.id)}
@@ -63,6 +81,32 @@ export default function ImageSlideSettings() {
             <><Wand2 className="w-4 h-4" /> Regenerate Image</>
           )}
         </button>
+
+        {activeSlide.imageUrl && (
+          <div className="pt-4 border-t border-gray-200 mt-4">
+            <label className="block text-sm font-medium text-gray-700 mb-1">Edit Image (Nano Banana 2)</label>
+            <div className="flex flex-col gap-2">
+              <textarea
+                value={editPrompt}
+                onChange={(e) => setEditPrompt(e.target.value)}
+                placeholder="e.g., Change the background to blue..."
+                className="w-full p-2 border border-gray-300 rounded-md text-sm h-20"
+              />
+              <button
+                onClick={() => {
+                  if (editPrompt.trim()) {
+                    editImageForSlide(activeSlide.id, editPrompt);
+                    setEditPrompt('');
+                  }
+                }}
+                disabled={activeSlide.status === 'generating' || !editPrompt.trim()}
+                className="w-full py-2 bg-white border border-indigo-600 text-indigo-600 rounded-lg font-medium hover:bg-indigo-50 disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                <Edit2 className="w-4 h-4" /> Edit Current Image
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

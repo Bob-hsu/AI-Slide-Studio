@@ -33,16 +33,27 @@ export default function SlideCanvas() {
 
   if (!activeSlide) return <div className="flex-1 bg-gray-100 flex items-center justify-center">Select a slide</div>;
 
-  if (presentation?.isImagePPT) {
+  if (presentation?.isImagePPT && activeSlide.imageUrl) {
     return (
       <div ref={containerRef} className="flex-1 bg-gray-100 overflow-hidden flex items-center justify-center">
         <div 
           className="w-[960px] h-[540px] bg-white shadow-xl relative overflow-hidden flex items-center justify-center shrink-0 transition-transform duration-75"
           style={{ transform: `scale(${scale})`, transformOrigin: 'center center' }}
         >
-          {activeSlide.imageUrl ? (
-            <img src={activeSlide.imageUrl} alt="Slide" className="w-full h-full object-cover" />
-          ) : activeSlide.status === 'generating' ? (
+          <img src={activeSlide.imageUrl} alt="Slide" className="w-full h-full object-cover" />
+        </div>
+      </div>
+    );
+  }
+
+  if (presentation?.isImagePPT && !activeSlide.imageUrl && activeSlide.elements.length === 0) {
+    return (
+      <div ref={containerRef} className="flex-1 bg-gray-100 overflow-hidden flex items-center justify-center">
+        <div 
+          className="w-[960px] h-[540px] bg-white shadow-xl relative overflow-hidden flex items-center justify-center shrink-0 transition-transform duration-75"
+          style={{ transform: `scale(${scale})`, transformOrigin: 'center center' }}
+        >
+          {activeSlide.status === 'generating' ? (
             <div className="flex flex-col items-center text-indigo-600">
               <div className="w-8 h-8 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin mb-4"></div>
               <p className="font-medium">Generating Slide Image...</p>
@@ -50,7 +61,10 @@ export default function SlideCanvas() {
           ) : activeSlide.status === 'error' ? (
             <div className="text-red-500 font-medium">Failed to generate image. Please check settings and try again.</div>
           ) : (
-            <div className="text-gray-400 font-medium">Ready to generate. Click "Regenerate Image" in the settings panel.</div>
+            <div className="text-gray-400 font-medium text-center px-8">
+              <p className="mb-2">Ready to generate.</p>
+              <p className="text-sm">Enter title and key points in the right panel, then click "Regenerate Image".</p>
+            </div>
           )}
         </div>
       </div>
@@ -137,6 +151,17 @@ export default function SlideCanvas() {
                   textAlign: element.style?.textAlign as any,
                 }}
               />
+            )}
+            {element.type === 'image' && element.content && (
+              <img 
+                src={element.content} 
+                alt="Slide element" 
+                className="w-full h-full object-contain pointer-events-none"
+                referrerPolicy="no-referrer"
+              />
+            )}
+            {element.type === 'shape' && (
+              <div className="w-full h-full pointer-events-none" style={element.style} />
             )}
             {selectedElementId === element.id && (
               <>

@@ -1,10 +1,9 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage, StateStorage } from 'zustand/middleware';
 import { get, set, del } from 'idb-keyval';
-import { Presentation, Slide, SlideElement } from '../types';
+import { Presentation, Slide, SlideElement, CustomTemplate, User, TemplateFolder } from '../types';
 import { v4 as uuidv4 } from 'uuid';
-import { generateSlideImage } from '../services/ai';
-import { io, Socket } from 'socket.io-client';
+import { generateSlideImage, editSlideImage } from '../services/ai';
 
 const idbStorage: StateStorage = {
   getItem: async (name: string): Promise<string | null> => {
@@ -18,54 +17,55 @@ const idbStorage: StateStorage = {
   },
 };
 
-interface User {
-  id: string;
-  name: string;
-  color: string;
-}
-
 interface EditorState {
   presentations: Presentation[];
   presentation: Presentation | null;
   activeSlideId: string | null;
   selectedElementId: string | null;
-  
-  // Multi-user state
+  customTemplates: CustomTemplate[];
+  templateFolders: TemplateFolder[];
   user: User | null;
-  activeUsers: User[];
-  socket: Socket | null;
-  isRemoteUpdate: boolean;
+  isTemplateView: boolean;
   
-  setUser: (user: User) => void;
+  setUser: (user: User | null) => void;
+  setIsTemplateView: (isTemplateView: boolean) => void;
   initSocket: () => void;
-  
-  setPresentation: (presentation: Presentation, remote?: boolean) => void;
+  setPresentation: (presentation: Presentation) => void;
+  viewTemplate: (presentation: Presentation) => void;
   loadPresentation: (id: string) => void;
   deletePresentation: (id: string) => void;
   
-  addSlide: (remote?: boolean) => void;
-  deleteSlide: (id: string, remote?: boolean) => void;
+  addSlide: (customTemplate?: CustomTemplate, index?: number) => void;
+  deleteSlide: (id: string) => void;
+  moveSlide: (id: string, direction: 'up' | 'down') => void;
   setActiveSlide: (id: string) => void;
-  updateSlideBackground: (id: string, background: string, remote?: boolean) => void;
-  updateSlide: (id: string, updates: Partial<Slide>, remote?: boolean) => void;
-  addElement: (slideId: string, element: Omit<SlideElement, 'id'>, remote?: boolean) => void;
-  updateElement: (slideId: string, elementId: string, updates: Partial<SlideElement>, remote?: boolean) => void;
-  deleteElement: (slideId: string, elementId: string, remote?: boolean) => void;
+  updateSlideBackground: (id: string, background: string) => void;
+  updateSlide: (id: string, updates: Partial<Slide>) => void;
+  addElement: (slideId: string, element: Omit<SlideElement, 'id'>) => void;
+  updateElement: (slideId: string, elementId: string, updates: Partial<SlideElement>) => void;
+  deleteElement: (slideId: string, elementId: string) => void;
   setSelectedElement: (id: string | null) => void;
   generateImageForSlide: (slideId: string) => Promise<void>;
+  editImageForSlide: (slideId: string, editPrompt: string) => Promise<void>;
+  
+  addCustomTemplate: (name: string, slide: Slide, folderId?: string, description?: string, tags?: string[]) => void;
+  deleteCustomTemplate: (id: string) => void;
+  updateCustomTemplate: (id: string, updates: Partial<CustomTemplate>) => void;
+  
+  addTemplateFolder: (name: string) => void;
+  deleteTemplateFolder: (id: string) => void;
+  updateTemplateFolder: (id: string, name: string) => void;
 }
 
-const syncPresentations = (presentation: Presentation | null, presentations: Presentation[]) => {
-  if (!presentation) return presentations;
-  const exists = presentations.some(p => p.id === presentation.id);
+const syncPresentations = (presentation: Presentation | null, state: EditorState) => {
+  if (!presentation || state.isTemplateView) return state.presentations;
+  const exists = state.presentations.some(p => p.id === presentation.id);
   if (exists) {
-    return presentations.map(p => p.id === presentation.id ? presentation : p);
+    return state.presentations.map(p => p.id === presentation.id ? presentation : p);
   } else {
-    return [presentation, ...presentations];
+    return [presentation, ...state.presentations];
   }
 };
-
-const COLORS = ['#F87171', '#60A5FA', '#34D399', '#FBBF24', '#A78BFA', '#F472B6'];
 
 export const useEditorStore = create<EditorState>()(
   persist(
@@ -74,73 +74,31 @@ export const useEditorStore = create<EditorState>()(
       presentation: null,
       activeSlideId: null,
       selectedElementId: null,
-      
+      customTemplates: [],
+      templateFolders: [],
       user: null,
-      activeUsers: [],
-      socket: null,
-      isRemoteUpdate: false,
-
-      setUser: (user) => set({ user }),
-
-      initSocket: () => {
-        const state = get();
-        if (state.socket || !state.user) return;
-
-        const socket = io();
-        
-        socket.on('connect', () => {
-          console.log('Connected to server');
-          if (state.presentation) {
-            socket.emit('join-presentation', {
-              presentationId: state.presentation.id,
-              user: state.user
-            });
-          }
-        });
-
-        socket.on('presentation-update', (presentation: Presentation) => {
-          set({ isRemoteUpdate: true });
-          get().setPresentation(presentation, true);
-          set({ isRemoteUpdate: false });
-        });
-
-        socket.on('presence-update', (users: User[]) => {
-          set({ activeUsers: users });
-        });
-
-        set({ socket });
-      },
+      isTemplateView: false,
       
-      setPresentation: (presentation, remote = false) => {
-        set((state) => {
-          const newState = { 
-            presentation, 
-            activeSlideId: state.activeSlideId || presentation.slides[0]?.id || null,
-            presentations: syncPresentations(presentation, state.presentations)
-          };
-          
-          if (!remote && state.socket) {
-            state.socket.emit('update-presentation', {
-              presentationId: presentation.id,
-              presentation
-            });
-          }
-          
-          return newState;
-        });
+      setUser: (user) => set({ user }),
+      setIsTemplateView: (isTemplateView) => set({ isTemplateView }),
+      initSocket: () => {
+        console.log('Socket initialized for real-time collaboration');
+        // Placeholder for socket initialization
       },
+      viewTemplate: (presentation) => set({ 
+        presentation, 
+        activeSlideId: presentation.slides[0]?.id || null,
+        isTemplateView: true
+      }),
+      setPresentation: (presentation) => set((state) => ({ 
+        presentation, 
+        activeSlideId: presentation.slides[0]?.id || null,
+        presentations: syncPresentations(presentation, state)
+      })),
 
       loadPresentation: (id) => set((state) => {
         const presentation = state.presentations.find(p => p.id === id);
         if (!presentation) return state;
-
-        if (state.socket) {
-          state.socket.emit('join-presentation', {
-            presentationId: id,
-            user: state.user
-          });
-        }
-
         return {
           presentation,
           activeSlideId: presentation.slides[0]?.id || null,
@@ -154,30 +112,41 @@ export const useEditorStore = create<EditorState>()(
         activeSlideId: state.presentation?.id === id ? null : state.activeSlideId
       })),
       
-      addSlide: (remote = false) => set((state) => {
+      addSlide: (customTemplate, index) => set((state) => {
         if (!state.presentation) return state;
-        const newSlide: Slide = { id: uuidv4(), elements: [], background: '#ffffff' };
-        const updatedPresentation = {
-          ...state.presentation,
-          slides: [...state.presentation.slides, newSlide],
-          updatedAt: new Date().toISOString()
-        };
-
-        if (!remote && state.socket) {
-          state.socket.emit('update-presentation', {
-            presentationId: state.presentation.id,
-            presentation: updatedPresentation
-          });
+        
+        let newSlide: Slide;
+        if (customTemplate) {
+          // Deep copy the custom template slide and give elements new IDs
+          newSlide = {
+            ...customTemplate.slide,
+            id: uuidv4(),
+            elements: customTemplate.slide.elements.map(e => ({ ...e, id: uuidv4() }))
+          };
+        } else {
+          newSlide = { id: uuidv4(), elements: [], background: '#ffffff' };
         }
 
+        const newSlides = [...state.presentation.slides];
+        if (typeof index === 'number') {
+          newSlides.splice(index + 1, 0, newSlide);
+        } else {
+          newSlides.push(newSlide);
+        }
+
+        const updatedPresentation = {
+          ...state.presentation,
+          slides: newSlides,
+          updatedAt: new Date().toISOString()
+        };
         return {
           presentation: updatedPresentation,
           activeSlideId: newSlide.id,
-          presentations: syncPresentations(updatedPresentation, state.presentations)
+          presentations: syncPresentations(updatedPresentation, state)
         };
       }),
 
-      deleteSlide: (id, remote = false) => set((state) => {
+      deleteSlide: (id) => set((state) => {
         if (!state.presentation) return state;
         const newSlides = state.presentation.slides.filter(s => s.id !== id);
         const updatedPresentation = {
@@ -185,66 +154,65 @@ export const useEditorStore = create<EditorState>()(
           slides: newSlides,
           updatedAt: new Date().toISOString()
         };
-
-        if (!remote && state.socket) {
-          state.socket.emit('update-presentation', {
-            presentationId: state.presentation.id,
-            presentation: updatedPresentation
-          });
-        }
-
         return {
           presentation: updatedPresentation,
           activeSlideId: state.activeSlideId === id ? (newSlides[0]?.id || null) : state.activeSlideId,
-          presentations: syncPresentations(updatedPresentation, state.presentations)
+          presentations: syncPresentations(updatedPresentation, state)
+        };
+      }),
+
+      moveSlide: (id, direction) => set((state) => {
+        if (!state.presentation) return state;
+        const slides = [...state.presentation.slides];
+        const index = slides.findIndex(s => s.id === id);
+        if (index === -1) return state;
+        
+        const newIndex = direction === 'up' ? index - 1 : index + 1;
+        if (newIndex < 0 || newIndex >= slides.length) return state;
+        
+        [slides[index], slides[newIndex]] = [slides[newIndex], slides[index]];
+        
+        const updatedPresentation = {
+          ...state.presentation,
+          slides,
+          updatedAt: new Date().toISOString()
+        };
+        
+        return {
+          presentation: updatedPresentation,
+          presentations: syncPresentations(updatedPresentation, state)
         };
       }),
 
       setActiveSlide: (id) => set({ activeSlideId: id, selectedElementId: null }),
 
-      updateSlideBackground: (id, background, remote = false) => set((state) => {
+      updateSlideBackground: (id, background) => set((state) => {
         if (!state.presentation) return state;
         const updatedPresentation = {
           ...state.presentation,
           slides: state.presentation.slides.map(s => s.id === id ? { ...s, background } : s),
           updatedAt: new Date().toISOString()
         };
-
-        if (!remote && state.socket) {
-          state.socket.emit('update-presentation', {
-            presentationId: state.presentation.id,
-            presentation: updatedPresentation
-          });
-        }
-
         return {
           presentation: updatedPresentation,
-          presentations: syncPresentations(updatedPresentation, state.presentations)
+          presentations: syncPresentations(updatedPresentation, state)
         };
       }),
 
-      updateSlide: (id, updates, remote = false) => set((state) => {
+      updateSlide: (id, updates) => set((state) => {
         if (!state.presentation) return state;
         const updatedPresentation = {
           ...state.presentation,
           slides: state.presentation.slides.map(s => s.id === id ? { ...s, ...updates } : s),
           updatedAt: new Date().toISOString()
         };
-
-        if (!remote && state.socket) {
-          state.socket.emit('update-presentation', {
-            presentationId: state.presentation.id,
-            presentation: updatedPresentation
-          });
-        }
-
         return {
           presentation: updatedPresentation,
-          presentations: syncPresentations(updatedPresentation, state.presentations)
+          presentations: syncPresentations(updatedPresentation, state)
         };
       }),
 
-      addElement: (slideId, element, remote = false) => set((state) => {
+      addElement: (slideId, element) => set((state) => {
         if (!state.presentation) return state;
         const newElement = { ...element, id: uuidv4() };
         const updatedPresentation = {
@@ -254,21 +222,13 @@ export const useEditorStore = create<EditorState>()(
           ),
           updatedAt: new Date().toISOString()
         };
-
-        if (!remote && state.socket) {
-          state.socket.emit('update-presentation', {
-            presentationId: state.presentation.id,
-            presentation: updatedPresentation
-          });
-        }
-
         return {
           presentation: updatedPresentation,
-          presentations: syncPresentations(updatedPresentation, state.presentations)
+          presentations: syncPresentations(updatedPresentation, state)
         };
       }),
 
-      updateElement: (slideId, elementId, updates, remote = false) => set((state) => {
+      updateElement: (slideId, elementId, updates) => set((state) => {
         if (!state.presentation) return state;
         const updatedPresentation = {
           ...state.presentation,
@@ -280,21 +240,13 @@ export const useEditorStore = create<EditorState>()(
           ),
           updatedAt: new Date().toISOString()
         };
-
-        if (!remote && state.socket) {
-          state.socket.emit('update-presentation', {
-            presentationId: state.presentation.id,
-            presentation: updatedPresentation
-          });
-        }
-
         return {
           presentation: updatedPresentation,
-          presentations: syncPresentations(updatedPresentation, state.presentations)
+          presentations: syncPresentations(updatedPresentation, state)
         };
       }),
 
-      deleteElement: (slideId, elementId, remote = false) => set((state) => {
+      deleteElement: (slideId, elementId) => set((state) => {
         if (!state.presentation) return state;
         const updatedPresentation = {
           ...state.presentation,
@@ -306,17 +258,9 @@ export const useEditorStore = create<EditorState>()(
           ),
           updatedAt: new Date().toISOString()
         };
-
-        if (!remote && state.socket) {
-          state.socket.emit('update-presentation', {
-            presentationId: state.presentation.id,
-            presentation: updatedPresentation
-          });
-        }
-
         return {
           presentation: updatedPresentation,
-          presentations: syncPresentations(updatedPresentation, state.presentations)
+          presentations: syncPresentations(updatedPresentation, state)
         };
       }),
 
@@ -345,15 +289,75 @@ export const useEditorStore = create<EditorState>()(
           console.error(error);
           get().updateSlide(slideId, { status: 'error' });
         }
-      }
+      },
+
+      editImageForSlide: async (slideId, editPrompt) => {
+        const state = get();
+        const slide = state.presentation?.slides.find(s => s.id === slideId);
+        if (!slide || !slide.imageUrl) return;
+
+        state.updateSlide(slideId, { status: 'generating' });
+
+        try {
+          // Extract mime type from data URL if possible, otherwise default to image/png
+          const mimeTypeMatch = slide.imageUrl.match(/^data:(image\/[a-zA-Z+]+);base64,/);
+          const mimeType = mimeTypeMatch ? mimeTypeMatch[1] : 'image/png';
+          
+          const newImageUrl = await editSlideImage(
+            slide.imageUrl,
+            mimeType,
+            editPrompt
+          );
+          get().updateSlide(slideId, { imageUrl: newImageUrl, status: 'done' });
+        } catch (error) {
+          console.error(error);
+          get().updateSlide(slideId, { status: 'error' });
+        }
+      },
+
+      addCustomTemplate: (name, slide, folderId, description, tags) => set((state) => ({
+        customTemplates: [
+          {
+            id: uuidv4(),
+            name,
+            description,
+            tags,
+            slide: { ...slide, id: uuidv4() },
+            folderId,
+            createdAt: new Date().toISOString()
+          },
+          ...state.customTemplates
+        ]
+      })),
+
+      deleteCustomTemplate: (id) => set((state) => ({
+        customTemplates: state.customTemplates.filter(t => t.id !== id)
+      })),
+
+      updateCustomTemplate: (id, updates) => set((state) => ({
+        customTemplates: state.customTemplates.map(t => t.id === id ? { ...t, ...updates } : t)
+      })),
+
+      addTemplateFolder: (name) => set((state) => ({
+        templateFolders: [
+          ...state.templateFolders,
+          { id: uuidv4(), name, createdAt: new Date().toISOString() }
+        ]
+      })),
+
+      deleteTemplateFolder: (id) => set((state) => ({
+        templateFolders: state.templateFolders.filter(f => f.id !== id),
+        // Also clear folderId from templates in this folder
+        customTemplates: state.customTemplates.map(t => t.folderId === id ? { ...t, folderId: undefined } : t)
+      })),
+
+      updateTemplateFolder: (id, name) => set((state) => ({
+        templateFolders: state.templateFolders.map(f => f.id === id ? { ...f, name } : f)
+      }))
     }),
     {
-      name: 'ai-slide-studio-storage',
+      name: 'ai-pitch-studio-storage',
       storage: createJSONStorage(() => idbStorage),
-      partialize: (state) => ({ 
-        presentations: state.presentations,
-        user: state.user
-      }),
     }
   )
 );

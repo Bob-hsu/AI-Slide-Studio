@@ -24,6 +24,29 @@ export interface Slide {
   status?: 'pending' | 'generating' | 'done' | 'error';
 }
 
+export interface TemplateFolder {
+  id: string;
+  name: string;
+  createdAt: string;
+}
+
+export interface CustomTemplate {
+  id: string;
+  name: string;
+  description?: string;
+  tags?: string[];
+  slide: Slide;
+  thumbnail?: string;
+  folderId?: string;
+  createdAt: string;
+}
+
+export interface User {
+  id: string;
+  name: string;
+  color: string;
+}
+
 export interface Presentation {
   id: string;
   title: string;

@@ -80,7 +80,7 @@ export default function AIAssistant() {
       }
     } catch (error) {
       console.error('Improve text error:', error);
-      alert('Failed to improve text.');
+      console.log('Failed to improve text.');
     } finally {
       setIsLoading(false);
     }
