@@ -108,7 +108,6 @@ export async function analyzePDFPresentation(pdfFile: SourceFile, style: string,
     model: 'gemini-3.1-pro-preview',
     contents: { parts },
     config: {
-      thinkingConfig: { thinkingLevel: ThinkingLevel.HIGH },
       responseMimeType: 'application/json',
       responseSchema: {
         type: Type.ARRAY,
@@ -194,7 +193,6 @@ export async function analyzeSlideImage(imageData: string, mimeType: string, lan
       ]
     },
     config: {
-      thinkingConfig: { thinkingLevel: ThinkingLevel.HIGH },
       responseMimeType: 'application/json',
       responseSchema: {
         type: Type.OBJECT,

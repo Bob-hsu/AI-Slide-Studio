@@ -6,6 +6,7 @@ import { v4 as uuidv4 } from 'uuid';
 import * as pdfjs from 'pdfjs-dist';
 import pdfWorker from 'pdfjs-dist/build/pdf.worker.mjs?url';
 import { planImagePresentation, analyzePDFPresentation, analyzeSlideImage, generateTemplateMetadata, SourceFile } from '../services/ai';
+import { Slide } from '../types';
 
 // Set worker source for pdfjs
 pdfjs.GlobalWorkerOptions.workerSrc = pdfWorker;
@@ -229,9 +230,57 @@ export default function Dashboard({ onOpenEditor }: { onOpenEditor: () => void }
 
     setIsGenerating(true);
     try {
-      const plans = await analyzePDFPresentation(pdfFile, globalStyle, language);
+      let plans: any[] = [];
+      try {
+        plans = await analyzePDFPresentation(pdfFile, globalStyle, language);
+      } catch (error) {
+        console.warn("Failed to analyze whole PDF, falling back to page-by-page analysis", error);
+      }
+
+      if (!plans || plans.length === 0) {
+        // Fallback: decode base64 to ArrayBuffer and use pdfjs
+        const binaryString = atob(pdfFile.data);
+        const len = binaryString.length;
+        const bytes = new Uint8Array(len);
+        for (let i = 0; i < len; i++) {
+            bytes[i] = binaryString.charCodeAt(i);
+        }
+        
+        const loadingTask = pdfjs.getDocument({ data: bytes.buffer });
+        const pdf = await loadingTask.promise;
+        const totalPages = pdf.numPages;
+        
+        for (let i = 1; i <= totalPages; i++) {
+          const page = await pdf.getPage(i);
+          const viewport = page.getViewport({ scale: 2 });
+          const canvas = document.createElement('canvas');
+          const context = canvas.getContext('2d');
+          canvas.height = viewport.height;
+          canvas.width = viewport.width;
+
+          if (context) {
+            await page.render({ canvasContext: context, viewport, canvas }).promise;
+            const base64 = canvas.toDataURL('image/png');
+            
+            try {
+              const analysis = await analyzeSlideImage(base64, 'image/png', language);
+              plans.push(analysis);
+            } catch (e) {
+              console.error(`Failed to analyze page ${i}`, e);
+              plans.push({
+                title: `Page ${i}`,
+                keyPoints: [],
+                imagePrompt: '',
+                layout: '',
+                description: '',
+                tags: []
+              });
+            }
+          }
+        }
+      }
       
-      const newSlides = plans.map((plan: any) => ({
+      const newSlides: Slide[] = plans.map((plan: any) => ({
         id: uuidv4(),
         elements: [],
         background: '#ffffff',
@@ -411,15 +460,21 @@ export default function Dashboard({ onOpenEditor }: { onOpenEditor: () => void }
       if (file.type === 'application/pdf') {
         const arrayBuffer = await file.arrayBuffer();
         
-        // Convert arrayBuffer to base64 for analyzePDFPresentation
-        const base64Data = btoa(
-          new Uint8Array(arrayBuffer)
-            .reduce((data, byte) => data + String.fromCharCode(byte), '')
-        );
+        // Convert file to base64 for analyzePDFPresentation
+        const base64Data = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => {
+            const result = reader.result as string;
+            resolve(result.split(',')[1]);
+          };
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
+        });
+        
         const sourceFile: SourceFile = {
           name: file.name,
           data: base64Data,
-          mimeType: file.type
+          mimeType: file.type || 'application/pdf'
         };
 
         const loadingTask = pdfjs.getDocument({ data: arrayBuffer });
@@ -428,8 +483,13 @@ export default function Dashboard({ onOpenEditor }: { onOpenEditor: () => void }
         
         setLearningProgress({ current: 0, total: totalPages });
         
-        // Analyze the whole PDF at once
-        const plans = await analyzePDFPresentation(sourceFile, globalStyle, language);
+        let plans: any[] = [];
+        try {
+          // Analyze the whole PDF at once
+          plans = await analyzePDFPresentation(sourceFile, globalStyle, language);
+        } catch (error) {
+          console.warn("Failed to analyze whole PDF, falling back to page-by-page analysis", error);
+        }
         
         const newPending: PendingTemplate[] = [];
 
@@ -445,14 +505,24 @@ export default function Dashboard({ onOpenEditor }: { onOpenEditor: () => void }
             await page.render({ canvasContext: context, viewport, canvas }).promise;
             const base64 = canvas.toDataURL('image/png');
             
-            const analysis = plans[i - 1] || {
-              title: `Page ${i}`,
-              keyPoints: [],
-              imagePrompt: '',
-              layout: '',
-              description: '',
-              tags: []
-            };
+            let analysis = plans[i - 1];
+            
+            if (!analysis) {
+              try {
+                // Fallback: analyze this specific page image
+                analysis = await analyzeSlideImage(base64, 'image/png', language);
+              } catch (e) {
+                console.error(`Failed to analyze page ${i}`, e);
+                analysis = {
+                  title: `Page ${i}`,
+                  keyPoints: [],
+                  imagePrompt: '',
+                  layout: '',
+                  description: '',
+                  tags: []
+                };
+              }
+            }
             
             const markdownPrompt = `Create a presentation slide image.
   Global Style: ${globalStyle}
